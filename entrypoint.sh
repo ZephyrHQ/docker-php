@@ -5,7 +5,8 @@ set -e
 if [ ! -f /lock-install ]; then
 
     if [ ${CONTAINER_ENV} = "prod" ]; then
-        # active 
+        # active
+        echo "Production"
     fi
 
     # Installation de composer

@@ -1,14 +1,13 @@
-FROM php:7.2-fpm-alpine
+FROM php:7.1-fpm-alpine
 
 ENV PS1 '\u@\h:\w\$ '
-RUN apk --no-cache add postgresql-dev icu-dev \
-    && docker-php-ext-install pdo pdo_pgsql intl \
-    && apk del postgresql-dev \
-    && apk --no-cache add --upgrade postgresql icu-libs \
+RUN apk --no-cache add icu-dev curl-dev gmp-dev libuv-dev libuv cassandra-cpp-driver cassandra-cpp-driver-dev \
+    && docker-php-ext-install pdo intl curl \
+    && apk --no-cache add --upgrade icu-libs \
     && apk add --no-cache --virtual .phpize-deps $PHPIZE_DEPS \
-    && pecl install xdebug redis apcu \
+    && pecl install xdebug redis apcu cassandra \
     && apk del .phpize-deps \
-    && docker-php-ext-enable apcu intl opcache pdo pdo_pgsql redis xdebug
+    && docker-php-ext-enable apcu intl opcache pdo curl redis xdebug cassandra
 
 RUN version=$(php -r "echo PHP_MAJOR_VERSION.PHP_MINOR_VERSION;") \
     && curl -A "Docker" -o /tmp/blackfire-probe.tar.gz -D - -L -s https://blackfire.io/api/v1/releases/probe/php/linux/amd64/$version \
