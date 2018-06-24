@@ -1,29 +1,28 @@
-FROM php:7.1-fpm-alpine
+FROM php:7.2-cli-alpine
+
+LABEL maintainer="Nicolas de Marqué <ndm@zephyr-web.fr>"
+LABEL maintainer="Thomas Talbot <thomas.talbot@zephyr-web.fr>"
 
 ENV PS1 '\u@\h:\w\$ '
-RUN apk --no-cache add icu-dev curl-dev gmp-dev libuv-dev libuv cassandra-cpp-driver cassandra-cpp-driver-dev \
-    && docker-php-ext-install pdo intl curl \
-    && apk --no-cache add --upgrade icu-libs \
-    && apk add --no-cache --virtual .phpize-deps $PHPIZE_DEPS \
-    && pecl install xdebug redis apcu cassandra \
-    && apk del .phpize-deps \
-    && docker-php-ext-enable apcu intl opcache pdo curl redis xdebug cassandra
-
-RUN version=$(php -r "echo PHP_MAJOR_VERSION.PHP_MINOR_VERSION;") \
-    && curl -A "Docker" -o /tmp/blackfire-probe.tar.gz -D - -L -s https://blackfire.io/api/v1/releases/probe/php/linux/amd64/$version \
-    && tar zxpf /tmp/blackfire-probe.tar.gz -C /tmp \
-    && mv /tmp/blackfire-*.so $(php -r "echo ini_get('extension_dir');")/blackfire.so \
-    && printf "extension=blackfire.so\nblackfire.agent_socket=tcp://blackfire:8707\n" > /usr/local/etc/php/conf.d/blackfire.ini \
-    && rm -rf /tmp/* \
-    ;
+RUN apk --no-cache add icu-dev \
+    && docker-php-ext-install intl \
+    && apk --no-cache add --upgrade icu-libs
 #
-COPY entrypoint.sh /usr/local/bin/entrypoint
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint
+
+# Environment variables
+ENV WKHTMLTOX_VERSION 0.12.4
+RUN  mkdir -p /tmp/patches
+COPY docker/wkhtmltopdf/conf/* /tmp/patches/
+COPY docker/wkhtmltopdf/wkhtmltopdf.install.sh /usr/local/bin/wkhtmltopdf.install
+RUN chmod +x /usr/local/bin/wkhtmltopdf.install \
+    && sh /usr/local/bin/wkhtmltopdf.install
+    
+WORKDIR /app
 #
-WORKDIR /var/www/html
-#
-EXPOSE 9000
+EXPOSE 80
 
 ENTRYPOINT ["entrypoint"]
 
-CMD ["php-fpm"]
+CMD ["watch", "ls"]    
