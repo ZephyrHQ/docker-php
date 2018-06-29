@@ -1,29 +1,144 @@
-FROM php:7.1-fpm-alpine
+FROM php:7.2-fpm-alpine
 
-ENV PS1 '\u@\h:\w\$ '
-RUN apk --no-cache add icu-dev curl-dev gmp-dev libuv-dev libuv cassandra-cpp-driver cassandra-cpp-driver-dev \
-    && docker-php-ext-install pdo intl curl \
-    && apk --no-cache add --upgrade icu-libs \
-    && apk add --no-cache --virtual .phpize-deps $PHPIZE_DEPS \
-    && pecl install xdebug redis apcu cassandra \
-    && apk del .phpize-deps \
-    && docker-php-ext-enable apcu intl opcache pdo curl redis xdebug cassandra
+# ensure www-data user exists
+RUN set -x \
+	&& addgroup -g 82 -S www-data \
+	&& adduser -u 82 -D -S -G www-data www-data
+# 82 is the standard uid/gid for "www-data" in Alpine
+# http://git.alpinelinux.org/cgit/aports/tree/main/apache2/apache2.pre-install?h=v3.3.2
+# http://git.alpinelinux.org/cgit/aports/tree/main/lighttpd/lighttpd.pre-install?h=v3.3.2
+# http://git.alpinelinux.org/cgit/aports/tree/main/nginx-initscripts/nginx-initscripts.pre-install?h=v3.3.2
 
-RUN version=$(php -r "echo PHP_MAJOR_VERSION.PHP_MINOR_VERSION;") \
-    && curl -A "Docker" -o /tmp/blackfire-probe.tar.gz -D - -L -s https://blackfire.io/api/v1/releases/probe/php/linux/amd64/$version \
-    && tar zxpf /tmp/blackfire-probe.tar.gz -C /tmp \
-    && mv /tmp/blackfire-*.so $(php -r "echo ini_get('extension_dir');")/blackfire.so \
-    && printf "extension=blackfire.so\nblackfire.agent_socket=tcp://blackfire:8707\n" > /usr/local/etc/php/conf.d/blackfire.ini \
-    && rm -rf /tmp/* \
-    ;
-#
-COPY entrypoint.sh /usr/local/bin/entrypoint
-RUN chmod +x /usr/local/bin/entrypoint
-#
-WORKDIR /var/www/html
-#
-EXPOSE 9000
+ENV HTTPD_PREFIX /usr/local/apache2
+ENV PATH $HTTPD_PREFIX/bin:$PATH
+RUN mkdir -p "$HTTPD_PREFIX" \
+	&& chown www-data:www-data "$HTTPD_PREFIX"
+WORKDIR $HTTPD_PREFIX
 
-ENTRYPOINT ["entrypoint"]
+ENV HTTPD_VERSION 2.4.33
+ENV HTTPD_SHA256 de02511859b00d17845b9abdd1f975d5ccb5d0b280c567da5bf2ad4b70846f05
 
-CMD ["php-fpm"]
+# https://httpd.apache.org/security/vulnerabilities_24.html
+ENV HTTPD_PATCHES=""
+
+ENV APACHE_DIST_URLS \
+# https://issues.apache.org/jira/browse/INFRA-8753?focusedCommentId=14735394#comment-14735394
+	https://www.apache.org/dyn/closer.cgi?action=download&filename= \
+# if the version is outdated (or we're grabbing the .asc file), we might have to pull from the dist/archive :/
+	https://www-us.apache.org/dist/ \
+	https://www.apache.org/dist/ \
+	https://archive.apache.org/dist/
+
+# see https://httpd.apache.org/docs/2.4/install.html#requirements
+RUN set -eux; \
+	\
+	runDeps=' \
+		apr-dev \
+		apr-util-dev \
+		apr-util-ldap \
+		perl \
+	'; \
+	apk add --no-cache --virtual .build-deps \
+		$runDeps \
+		ca-certificates \
+		coreutils \
+		dpkg-dev dpkg \
+		gcc \
+		gnupg \
+		libc-dev \
+		# mod_session_crypto
+		libressl \
+		libressl-dev \
+		# mod_proxy_html mod_xml2enc
+		libxml2-dev \
+		# mod_lua
+		lua-dev \
+		make \
+		# mod_http2
+		nghttp2-dev \
+		pcre-dev \
+		tar \
+		# mod_deflate
+		zlib-dev \
+	; \
+	\
+	ddist() { \
+		local f="$1"; shift; \
+		local distFile="$1"; shift; \
+		local success=; \
+		local distUrl=; \
+		for distUrl in $APACHE_DIST_URLS; do \
+			if wget -O "$f" "$distUrl$distFile" && [ -s "$f" ]; then \
+				success=1; \
+				break; \
+			fi; \
+		done; \
+		[ -n "$success" ]; \
+	}; \
+	\
+	ddist 'httpd.tar.bz2' "httpd/httpd-$HTTPD_VERSION.tar.bz2"; \
+	echo "$HTTPD_SHA256 *httpd.tar.bz2" | sha256sum -c -; \
+	\
+# see https://httpd.apache.org/download.cgi#verify
+	ddist 'httpd.tar.bz2.asc' "httpd/httpd-$HTTPD_VERSION.tar.bz2.asc"; \
+	export GNUPGHOME="$(mktemp -d)"; \
+	for key in \
+# gpg: key 791485A8: public key "Jim Jagielski (Release Signing Key) <jim@apache.org>" imported
+		A93D62ECC3C8EA12DB220EC934EA76E6791485A8 \
+# gpg: key 995E35221AD84DFF: public key "Daniel Ruggeri (http://home.apache.org/~druggeri/) <druggeri@apache.org>" imported
+		B9E8213AEFB861AF35A41F2C995E35221AD84DFF \
+	; do \
+		gpg --keyserver ha.pool.sks-keyservers.net --recv-keys "$key"; \
+	done; \
+	gpg --batch --verify httpd.tar.bz2.asc httpd.tar.bz2; \
+	rm -rf "$GNUPGHOME" httpd.tar.bz2.asc; \
+	\
+	mkdir -p src; \
+	tar -xf httpd.tar.bz2 -C src --strip-components=1; \
+	rm httpd.tar.bz2; \
+	cd src; \
+	\
+	patches() { \
+		while [ "$#" -gt 0 ]; do \
+			local patchFile="$1"; shift; \
+			local patchSha256="$1"; shift; \
+			ddist "$patchFile" "httpd/patches/apply_to_$HTTPD_VERSION/$patchFile"; \
+			echo "$patchSha256 *$patchFile" | sha256sum -c -; \
+			patch -p0 < "$patchFile"; \
+			rm -f "$patchFile"; \
+		done; \
+	}; \
+	patches $HTTPD_PATCHES; \
+	\
+	gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
+	./configure \
+		--build="$gnuArch" \
+		--prefix="$HTTPD_PREFIX" \
+		--enable-mods-shared=reallyall \
+		--enable-mpms-shared=all \
+	; \
+	make -j "$(nproc)"; \
+	make install; \
+	\
+	cd ..; \
+	rm -r src man manual; \
+	\
+	sed -ri \
+		-e 's!^(\s*CustomLog)\s+\S+!\1 /proc/self/fd/1!g' \
+		-e 's!^(\s*ErrorLog)\s+\S+!\1 /proc/self/fd/2!g' \
+		"$HTTPD_PREFIX/conf/httpd.conf"; \
+	\
+	runDeps="$runDeps $( \
+		scanelf --needed --nobanner --format '%n#p' --recursive /usr/local \
+			| tr ',' '\n' \
+			| sort -u \
+			| awk 'system("[ -e /usr/local/lib/" $1 " ]") == 0 { next } { print "so:" $1 }' \
+	)"; \
+	apk add --virtual .httpd-rundeps $runDeps; \
+	apk del .build-deps
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x entrypoint.sh
+
+EXPOSE 80
+CMD ["entrypoint.sh"]
