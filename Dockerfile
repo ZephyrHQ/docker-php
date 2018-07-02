@@ -1,29 +1,40 @@
-FROM php:7.1-fpm-alpine
+FROM alpine:3.7
 
-ENV PS1 '\u@\h:\w\$ '
-RUN apk --no-cache add icu-dev curl-dev gmp-dev libuv-dev libuv cassandra-cpp-driver cassandra-cpp-driver-dev \
-    && docker-php-ext-install pdo intl curl \
-    && apk --no-cache add --upgrade icu-libs \
-    && apk add --no-cache --virtual .phpize-deps $PHPIZE_DEPS \
-    && pecl install xdebug redis apcu cassandra \
-    && apk del .phpize-deps \
-    && docker-php-ext-enable apcu intl opcache pdo curl redis xdebug cassandra
+# ensure www-data user exists
+RUN apk add --update --no-cache php7 \
+    # Base
+    php7-dom \
+    php7-opcache \
+    php7-phar \
+    php7-openssl \
+    php7-curl \
+    php7-ctype \
+    php7-xml \
+    php7-tokenizer \
+    php7-iconv \
+    php7-json \
+    php7-mbstring \
+    php7-redis \
+    # Serveur
+    lighttpd \
+    php7-cgi \
+    fcgi \
+    && echo "Fin des installation php"
 
-RUN version=$(php -r "echo PHP_MAJOR_VERSION.PHP_MINOR_VERSION;") \
-    && curl -A "Docker" -o /tmp/blackfire-probe.tar.gz -D - -L -s https://blackfire.io/api/v1/releases/probe/php/linux/amd64/$version \
-    && tar zxpf /tmp/blackfire-probe.tar.gz -C /tmp \
-    && mv /tmp/blackfire-*.so $(php -r "echo ini_get('extension_dir');")/blackfire.so \
-    && printf "extension=blackfire.so\nblackfire.agent_socket=tcp://blackfire:8707\n" > /usr/local/etc/php/conf.d/blackfire.ini \
-    && rm -rf /tmp/* \
-    ;
-#
+WORKDIR /app
+
+EXPOSE 80
+
+COPY lighttpd.conf /etc/lighttpd/lighttpd.conf
+RUN mkdir /run/lighttpd/ \
+    && chown lighttpd:lighttpd /run/lighttpd/
+
 COPY entrypoint.sh /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint
-#
-WORKDIR /var/www/html
-#
-EXPOSE 9000
+
+ENV APP_ENV=prod
+ENV APP_SECRET=6f6602bcbac5846fcf2a3f245148ef3e
 
 ENTRYPOINT ["entrypoint"]
 
-CMD ["php-fpm"]
+CMD ["lighttpd", "-D", "-f", "/etc/lighttpd/lighttpd.conf"]
