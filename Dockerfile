@@ -2,7 +2,7 @@ FROM php:7.2-fpm-alpine
 
 ENV PS1 '\u@\h:\w\$ '
 RUN apk --no-cache add icu-dev curl-dev \
-    && docker-php-ext-install pdo intl curl \
+    && docker-php-ext-install pdo intl curl pdo-mysql \
     && apk --no-cache add --upgrade icu-libs \
     && apk add --no-cache --virtual .phpize-deps $PHPIZE_DEPS \
     && pecl install xdebug redis apcu \
