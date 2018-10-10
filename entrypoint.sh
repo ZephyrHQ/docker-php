@@ -20,6 +20,7 @@ if [ ! -f /lock-install ]; then
 
         php composer-setup.php --install-dir=/usr/local/bin --filename=composer
         rm composer-setup.php
+        # Outils: bash csfixer bash-completion
         echo Installation Outils
         apk add --no-cache vim curl wget bash bash-completion
         wget http://cs.sensiolabs.org/download/php-cs-fixer-v2.phar -O /usr/local/bin/php-cs-fixer

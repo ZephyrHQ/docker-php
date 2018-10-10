@@ -1,7 +1,10 @@
+# Building environnement
 FROM alpine:3.8
 
 # ensure www-data user exists
 RUN apk add --update --no-cache php7 \
+    # fpm
+    php7-fpm \
     # Base
     php7-dom \
     php7-opcache \
@@ -14,20 +17,12 @@ RUN apk add --update --no-cache php7 \
     php7-iconv \
     php7-json \
     php7-mbstring \
-    php7-redis \
-    # Serveur
-    lighttpd \
-    php7-cgi \
-    fcgi \
     && echo "Fin des installation php"
 
 WORKDIR /app
 
-EXPOSE 80
-
-COPY lighttpd.conf /etc/lighttpd/lighttpd.conf
-RUN mkdir /run/lighttpd/ \
-    && chown lighttpd:lighttpd /run/lighttpd/
+COPY www.conf /etc/php7/php-fpm.d/www.conf
+EXPOSE 9000
 
 COPY entrypoint.sh /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint
@@ -37,4 +32,4 @@ ENV APP_SECRET=6f6602bcbac5846fcf2a3f245148ef3e
 
 ENTRYPOINT ["entrypoint"]
 
-CMD ["lighttpd", "-D", "-f", "/etc/lighttpd/lighttpd.conf"]
+CMD ["/usr/sbin/php-fpm7", "-F"]
