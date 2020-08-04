@@ -1,4 +1,4 @@
-FROM php:7.2-fpm-alpine
+FROM php:7-fpm-alpine
 
 ENV PS1 '\u@\h:\w\$ '
 RUN apk --no-cache add icu-dev curl-dev \
